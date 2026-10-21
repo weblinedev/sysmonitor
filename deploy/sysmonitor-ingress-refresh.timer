@@ -1,0 +1,10 @@
+[Unit]
+Description=Check SysMonitor TLS certificate refresh twice daily
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=12h
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

@@ -135,18 +135,72 @@ class TestSysMonitor(unittest.TestCase):
             with self.subTest(extra=extra), self.assertRaises(ValueError):
                 validate_telemetry({**METRIC, **extra})
 
-    def test_resource_threshold_debounce_and_hysteresis(self):
-        high = {**METRIC, "disk_percent": 86}
-        self.app.accept_telemetry(high)
-        self.app.accept_telemetry(high)
+    def test_disk_levels_escalate_without_spam_and_recover_with_hysteresis(self):
+        for value in (80, 89, 90, 94, 95, 99):
+            self.app.accept_telemetry({**METRIC, "disk_percent": value})
+        self.assertEqual(self.count("outbox"), 3)
+        self.app.accept_telemetry({**METRIC, "disk_percent": 94})
+        self.assertEqual(self.app.store.get("disk_level"), 3)
+        self.app.accept_telemetry({**METRIC, "disk_percent": 92})
+        self.assertEqual(self.app.store.get("disk_level"), 2)
+        self.app.accept_telemetry({**METRIC, "disk_percent": 77})
+        self.assertEqual(self.app.store.get("disk_level"), 0)
+        self.assertEqual(self.count("outbox"), 5)
+
+    def test_pressure_requires_elapsed_minutes_and_gap_resets_confirmation(self):
+        high = {**METRIC, "disk_percent": 70, "cpu_percent": 95}
+        for stamp in (1000, 1001, 1002, 1003, 1004):
+            with patch("time.time", return_value=stamp):
+                self.app.accept_telemetry(high)
         self.assertEqual(self.count("outbox"), 0)
-        self.app.accept_telemetry(high)
+        for stamp in (1060, 1120, 1180, 1240, 1300):
+            with patch("time.time", return_value=stamp):
+                self.app.accept_telemetry(high)
         self.assertEqual(self.count("outbox"), 1)
-        self.app.accept_telemetry(high)
-        self.app.accept_telemetry({**METRIC, "disk_percent": 82})
-        self.assertEqual(self.count("outbox"), 1)
-        self.app.accept_telemetry({**METRIC, "disk_percent": 79})
+        with patch("time.time", return_value=1360):
+            self.app.accept_telemetry({**high, "cpu_percent": 84})
         self.assertEqual(self.count("outbox"), 2)
+        for stamp in (1420, 1480, 2000, 2060, 2120):
+            with patch("time.time", return_value=stamp):
+                self.app.accept_telemetry(high)
+        self.assertEqual(self.count("outbox"), 2)
+
+    def test_daily_toggle_does_not_mute_alerts_and_report_is_durable(self):
+        from datetime import datetime
+        from sysmonitor.app import TEHRAN
+        stamp = datetime(2026, 10, 22, 23, 1, tzinfo=TEHRAN).timestamp()
+        self.app.reply("daily off")
+        with patch("time.time", return_value=stamp):
+            self.app.daily_once()
+            self.app.accept_telemetry({**METRIC, "disk_percent": 96})
+        self.assertEqual(self.count("outbox"), 1)
+        self.app.reply("daily time 22:30")
+        self.app.reply("daily on")
+        with patch("time.time", return_value=stamp):
+            self.app.daily_once()
+            Application(self.cfg, self.tg).daily_once()
+        self.assertEqual(self.count("outbox"), 2)
+        self.assertEqual(self.app.store.get("daily_sent"), "2026-10-22")
+        self.app.reply("daily time 99:99")
+        self.assertEqual(self.app.store.get("daily_time"), "22:30")
+
+    def test_service_failures_need_three_reports_and_two_minutes(self):
+        bad = {**METRIC, "disk_percent": 70, "services": {"httpd.service": "failed"}}
+        for stamp in (1000, 1060, 1120, 1180):
+            with patch("time.time", return_value=stamp):
+                self.app.accept_telemetry(bad)
+        self.assertEqual(self.count("outbox"), 1)
+        with patch("time.time", return_value=1240):
+            self.app.accept_telemetry({**bad, "services": {"httpd.service": "active"}})
+        self.assertEqual(self.count("outbox"), 2)
+
+    def test_contributor_schema_rejects_arbitrary_process_data(self):
+        valid = [{"group": "PHP", "cpu_percent": 30, "memory_percent": 20}]
+        self.assertEqual(validate_telemetry({**METRIC, "contributors": valid})["contributors"], valid)
+        for value in ([{"group": "private-command", "cpu_percent": 30, "memory_percent": 20}],
+                      [{**valid[0], "cmdline": "secret"}], [{**valid[0], "cpu_percent": float("inf")}], valid*7):
+            with self.assertRaises(ValueError):
+                validate_telemetry({**METRIC, "contributors": value})
 
     def test_config_rejects_public_receiver_and_remote_kuma(self):
         env = {"TELEGRAM_BOT_TOKEN": "fake", "TELEGRAM_OWNER_ID": "12345",

@@ -9,12 +9,15 @@ from pathlib import Path
 import signal
 import threading
 import time
+import re
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from .core import Store, clean, parse_metrics, resources_text, status_text, utcstamp, validate_telemetry, STATUS
+from .core import Store, clean, contributors_text, parse_metrics, resources_text, status_text, utcstamp, validate_telemetry, STATUS
 
 LOG = logging.getLogger("sysmonitor")
 
@@ -75,7 +78,11 @@ KEYBOARD = {"inline_keyboard": [
     [{"text": "⏱ آپتایم", "callback_data": "uptime"},
      {"text": "📋 رخدادها", "callback_data": "incidents"}],
     [{"text": "🧪 تست اعلان", "callback_data": "test"},
-     {"text": "راهنما", "callback_data": "help"}]]}
+     {"text": "راهنما", "callback_data": "help"}],
+    [{"text": "گزارش روزانه روشن", "callback_data": "daily_on"},
+     {"text": "گزارش روزانه خاموش", "callback_data": "daily_off"}]]}
+
+TEHRAN = ZoneInfo("Asia/Tehran")
 
 
 class Application:
@@ -89,6 +96,19 @@ class Application:
         self.rate = float("-inf")
 
     def reply(self, command):
+        if command in ("daily_on", "daily_off"):
+            command = "daily " + command.rsplit("_", 1)[1]
+        if command.split(" ")[0] == "daily":
+            parts = command.split()
+            if parts[1:] in (["on"], ["off"]):
+                self.store.set("daily_enabled", parts[1] == "on")
+            elif len(parts) == 3 and parts[1] == "time" and re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", parts[2]):
+                self.store.set("daily_time", parts[2])
+            elif len(parts) > 1:
+                return "تنظیم معتبر: <code>/daily on</code> یا <code>/daily off</code> یا <code>/daily time 23:00</code>"
+            enabled = self.store.get("daily_enabled", True)
+            hour = self.store.get("daily_time", "23:00")
+            return f"📅 گزارش روزانه {'روشن' if enabled else 'خاموش'} است.\nساعت <code>{hour}</code> به وقت تهران.\nهشدارهای قطعی و منابع همیشه فعال‌اند.\n/daily on · /daily off\n<code>/daily time 23:00</code>"
         if command in ("start", "status"):
             return status_text(self.store.get("snapshot"))
         if command == "resources":
@@ -114,7 +134,7 @@ class Application:
             return "🧪 <b>تست SysMonitor موفق بود</b>\nدریافت فرمان و مسیر پاسخ تلگرام کار می‌کند. این تست، شبیه‌سازی قطع سرور نیست."
         return ("🛰 <b>SysMonitor | Webline</b>\n\n"
                 "/status — وضعیت سرویس‌ها\n/resources — منابع ایران\n/uptime — نسبت آپتایم\n"
-                "/incidents — آخرین رخدادها\n/test — تست پاسخ\n\n"
+                "/incidents — آخرین رخدادها\n/test — تست پاسخ\n/daily — تنظیم گزارش روزانه\n\n"
                 "فقط مالک به گزارش‌ها دسترسی دارد. بات دستور اجرایی، ری‌استارت یا دسترسی شل ندارد.\n"
                 "قطع از ترکیه ممکن است ناشی از مسیر شبکه باشد؛ علت خرابی سرور نیاز به بررسی دارد.")
 
@@ -131,7 +151,13 @@ class Application:
         text = None
         if allowed and time.monotonic() - self.rate >= 1:
             self.rate = time.monotonic()
-            cmd = callback.get("data", "help") if callback else str(message.get("text", "")).split(" ")[0].lstrip("/").split("@")[0]
+            if callback:
+                cmd = callback.get("data", "help")
+            else:
+                parts = str(message.get("text", "")).strip().split(maxsplit=1)
+                cmd = parts[0].lstrip("/").split("@")[0] if parts else "help"
+                if cmd == "daily" and len(parts) > 1:
+                    cmd += " " + parts[1].lower()
             text = self.reply(cmd)
         # Persist command reply and offset together. Restart never loses an accepted response.
         with self.store.db() as db:
@@ -198,6 +224,7 @@ class Application:
             self.store.enqueue("⚪ <b>داده منابع ایران قدیمی شده</b>\nبیش از ۳ دقیقه داده تازه نرسیده است؛ وضعیت سرویس‌ها را جداگانه بررسی کن.")
         self.store.set("telemetry_stale", stale)
         self.store.prune()
+        self.daily_once()
 
     def accept_telemetry(self, payload):
         data = validate_telemetry(payload)
@@ -207,21 +234,91 @@ class Application:
         if self.store.get("telemetry_stale"):
             self.store.enqueue("🟢 <b>دریافت منابع ایران بازیابی شد</b>\nداده تازه دوباره در دسترس است.")
             self.store.set("telemetry_stale", False)
-        # Three consecutive reports above threshold; 5 percentage-point recovery gap.
-        # Only percentage warnings here; uptime probes are owned by Kuma.
-        for key, threshold in (("cpu_percent", 90), ("memory_percent", 90), ("disk_percent", 85)):
-            state = self.store.get("threshold:" + key, {"count": 0, "active": False})
-            if gap:
-                state["count"] = 0
+        now = time.time()
+        day = datetime.fromtimestamp(now, TEHRAN).date().isoformat()
+        with self.store.db() as db:
+            db.execute("""INSERT INTO resource_daily VALUES (?,1,?,?,?,?,?)
+                ON CONFLICT(day) DO UPDATE SET samples=samples+1,
+                cpu_sum=cpu_sum+excluded.cpu_sum,cpu_max=max(cpu_max,excluded.cpu_max),
+                ram_sum=ram_sum+excluded.ram_sum,ram_max=max(ram_max,excluded.ram_max),
+                disk_max=max(disk_max,excluded.disk_max)""",
+                (day, data["cpu_percent"], data["cpu_percent"], data["memory_percent"], data["memory_percent"], data["disk_percent"]))
+            db.execute("DELETE FROM resource_daily WHERE day < ?", ((datetime.fromtimestamp(now, TEHRAN)-timedelta(days=35)).date().isoformat(),))
+        # Wall-clock sustained pressure, not merely a burst of five HTTP requests.
+        for key, label in (("cpu_percent", "CPU"), ("memory_percent", "RAM")):
+            state = self.store.get("pressure:" + key, {"count": 0, "since": now, "active": False})
             value = data[key]
-            state["count"] = state["count"] + 1 if value >= threshold else 0
-            if state["count"] >= 3 and not state["active"]:
-                self.store.enqueue(f"🟠 <b>فشار منابع ایران</b>\n{clean(key)}: {value:.1f}%\nسه گزارش پیاپی بالاتر از {threshold}% بوده است.")
+            if gap or value < 90:
+                state.update(count=0, since=now)
+            if value >= 90:
+                if not state["count"]:
+                    state["since"] = now
+                state["count"] += 1
+            if state["count"] >= 5 and now-state["since"] >= 300 and not state["active"]:
+                self.store.enqueue(f"🟠 <b>فشار پایدار {label} در ایران</b>\nمصرف: <code>{value:.1f}%</code>\nحداقل ۵ دقیقه پیوسته بالای ۹۰٪.\n\n" + contributors_text(data))
                 state["active"] = True
-            if state["active"] and value < threshold - 5:
-                self.store.enqueue(f"🟢 <b>منابع به محدوده عادی برگشت</b>\n{clean(key)}: {value:.1f}%")
+            if state["active"] and value < 85:
+                self.store.enqueue(f"🟢 <b>{label} به محدوده عادی برگشت</b>\nمصرف: <code>{value:.1f}%</code>")
                 state["active"] = False
-            self.store.set("threshold:" + key, state)
+            self.store.set("pressure:" + key, state)
+        value = data["disk_percent"]
+        old = self.store.get("disk_level", 0)
+        level = 3 if value >= 95 else 2 if value >= 90 else 1 if value >= 80 else 0
+        # Escalate immediately; require two percentage points of recovery below the old boundary.
+        if level < old and value >= (80, 90, 95)[old-1]-2:
+            level = old
+        if level != old:
+            icon, label = (("🟢", "عادی"), ("🟡", "هشدار"), ("🔴", "خطر"), ("🚨", "بحرانی"))[level]
+            action = ("فضای آزاد را بررسی و برای افزایش ظرفیت یا پاکسازی بررسی‌شده اقدام کن."
+                      if level else "مصرف به زیر محدوده هشدار برگشت.")
+            self.store.enqueue(f"{icon} <b>دیسک ایران · {label}</b>\nمصرف ریشه: <code>{value:.1f}%</code>\n{action}\nهیچ فایلی خودکار حذف نمی‌شود.")
+            self.store.set("disk_level", level)
+        for unit in ("httpd.service", "mariadb.service", "sshd.service", "lfd.service"):
+            value = data.get("services", {}).get(unit, "unknown")
+            state = self.store.get("service:" + unit, {"count": 0, "since": now, "active": False})
+            if gap or value not in ("inactive", "failed"):
+                state.update(count=0, since=now)
+            if value in ("inactive", "failed"):
+                if not state["count"]:
+                    state["since"] = now
+                state["count"] += 1
+                if state["count"] >= 3 and now-state["since"] >= 120 and not state["active"]:
+                    self.store.enqueue(f"🔴 <b>سرویس ایران پایدار غیرفعال است</b>\n<code>{unit}</code>\nحداقل دو دقیقه و سه نمونه. ری‌استارت خودکار انجام نمی‌شود.")
+                    state["active"] = True
+            elif value == "active" and state["active"]:
+                self.store.enqueue(f"🟢 <b>سرویس ایران بازیابی شد</b>\n<code>{unit}</code>")
+                state["active"] = False
+            self.store.set("service:" + unit, state)
+
+    def daily_once(self):
+        if not self.store.get("daily_enabled", True):
+            return
+        now = datetime.fromtimestamp(time.time(), TEHRAN)
+        day = now.date().isoformat()
+        if now.strftime("%H:%M") < self.store.get("daily_time", "23:00"):
+            return
+        snapshot = self.store.get("snapshot")
+        if snapshot:
+            snapshot = {**snapshot, "monitors": dict(list(snapshot["monitors"].items())[:5])}
+        telemetry = self.store.get("telemetry")
+        if telemetry:
+            telemetry = {**telemetry, "data": {k: v for k, v in telemetry["data"].items() if k not in ("services", "contributors")}}
+        lines = [f"📅 <b>گزارش روزانه SysMonitor</b>\n<code>{day}</code> · وقت تهران", status_text(snapshot), resources_text(telemetry)]
+        if snapshot and time.time()-snapshot["time"] <= 120:
+            ratios = [clean(r["name"], 45)+f" · <code>{r['uptime_ratio_24h']*100:.3f}%</code>"
+                      for r in snapshot["monitors"].values() if "uptime_ratio_24h" in r]
+            if ratios:
+                lines.append("آپتایم ثبت‌شده در بازه ۲۴ ساعت:\n"+"\n".join(ratios))
+        with self.store.db() as db:
+            row = db.execute("SELECT value FROM state WHERE key='daily_sent'").fetchone()
+            if row and json.loads(row[0]) == day:
+                return
+            stats = db.execute("SELECT * FROM resource_daily WHERE day=?", (day,)).fetchone()
+            if stats:
+                lines.append(f"📈 نمونه‌های امروز: {stats['samples']}\nCPU میانگین/اوج: {stats['cpu_sum']/stats['samples']:.1f}% / {stats['cpu_max']:.1f}%\nRAM میانگین/اوج: {stats['ram_sum']/stats['samples']:.1f}% / {stats['ram_max']:.1f}%\nاوج دیسک: {stats['disk_max']:.1f}%")
+            lines.append("این گزارش جمع‌بندی پایش است؛ سالم بودن همه وب‌سایت‌ها و تراکنش‌ها را تضمین نمی‌کند.\nتنظیم گزارش: /daily")
+            self.store._enqueue(db, "\n\n".join(lines))
+            db.execute("INSERT OR REPLACE INTO state VALUES ('daily_sent',?)", (json.dumps(day),))
 
     def worker(self, name, action, interval):
         while not self.stop.is_set():

@@ -17,9 +17,49 @@ def cpu_ticks():
     return sum(nums), nums[3] + nums[4]
 
 
+def process_sample():
+    """Bounded numeric /proc sample; never read cmdline, environ, user or paths."""
+    groups = (("php", "PHP"), ("httpd", "Apache"), ("apache", "Apache"),
+              ("mariadb", "Database"), ("mysqld", "Database"), ("clam", "Security"),
+              ("imunify", "Security"), ("lfd", "Security"), ("cpsrvd", "cPanel"),
+              ("cpanel", "cPanel"), ("sshd", "SSH"), ("backup", "Backup"))
+    result = {}
+    for entry in list(Path("/proc").iterdir())[:8192]:
+        if not entry.name.isdecimal():
+            continue
+        try:
+            raw = (entry / "stat").read_text()[:4096]
+            name = raw.split("(", 1)[1].rsplit(")", 1)[0].lower()
+            fields = raw.rsplit(") ", 1)[1].split()
+            group = next((g for needle, g in groups if needle in name), "Other")
+            result[entry.name] = (group, int(fields[11]) + int(fields[12]), int(fields[21]))
+        except (OSError, ValueError, IndexError):
+            continue  # Process ended, or kernel denied this unprivileged sample.
+    return result
+
+
+def contributors(first, second, elapsed, memory_kb):
+    totals = {}
+    cores, hz, page = os.cpu_count() or 1, os.sysconf("SC_CLK_TCK"), os.sysconf("SC_PAGE_SIZE")
+    for pid, (group, ticks, rss) in second.items():
+        row = totals.setdefault(group, {"group": group, "cpu_percent": 0, "memory_percent": 0})
+        before = first.get(pid)
+        if before and before[0] == group:
+            row["cpu_percent"] += max(0, ticks-before[1]) / hz / max(elapsed, 0.1) / cores * 100
+        row["memory_percent"] += max(0, rss) * page / (memory_kb * 1024) * 100
+    for row in totals.values():
+        for field in ("cpu_percent", "memory_percent"):
+            row[field] = round(min(100, row[field]), 2)
+    return sorted(totals.values(), key=lambda r: r["cpu_percent"] + r["memory_percent"], reverse=True)[:6]
+
+
 def collect():
     first, idle_first = cpu_ticks()
+    processes_first = process_sample()
+    started = time.monotonic()
     time.sleep(1)
+    processes_second = process_sample()
+    elapsed = time.monotonic() - started
     second, idle_second = cpu_ticks()
     cpu = 100 * (1 - (idle_second - idle_first) / max(1, second - first))
     mem = {}
@@ -42,7 +82,8 @@ def collect():
         "disk_percent": round(100 * usage.used / usage.total, 2),
         "swap_percent": round(100 * (1 - mem["SwapFree"] / mem["SwapTotal"]), 2) if mem["SwapTotal"] else 0,
         "uptime_seconds": float(Path("/proc/uptime").read_text().split()[0]),
-        "load1": os.getloadavg()[0], "cores": os.cpu_count() or 1, "services": services}
+        "load1": os.getloadavg()[0], "cores": os.cpu_count() or 1, "services": services,
+        "contributors": contributors(processes_first, processes_second, elapsed, mem["MemTotal"])}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

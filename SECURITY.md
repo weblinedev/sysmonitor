@@ -2,7 +2,7 @@
 
 ## Supported scope
 
-SysMonitor 0.1.x is an initial release under deployment validation. It is not a promise of independent audit, high availability or guaranteed alert delivery. Keep the host operating system and upstream Kuma supported and patched.
+SysMonitor 0.2.x is an initial release under deployment validation. It is not a promise of independent audit, high availability or guaranteed alert delivery. Keep the host operating system and upstream Kuma supported and patched.
 
 ## Boundaries
 
@@ -18,7 +18,7 @@ SysMonitor 0.1.x is an initial release under deployment validation. It is not a 
 
 Place runtime environment files in `/etc/sysmonitor`, root-owned with mode 0600. Use independent, random 32+ character secrets. The bot token, collector token, metrics key, databases, backups and private inventory must never be committed. Example files contain placeholders only. Review the complete staged diff before publishing.
 
-The state database contains event names, status, receipt timestamps, the current telemetry sample, authorization-independent update offsets and pending rendered messages. It is private operational data. Incidents are pruned after 90 days. Pending messages remain until delivered, with a 2,000-message queue cap. Monitor an extended delivery failure before the queue fills.
+The state database contains event names, status, receipt timestamps, the current telemetry sample, authorization-independent update offsets and pending rendered messages. It is private operational data. Incidents are pruned after 90 days; daily numeric aggregates after 35 days. No raw process names or arguments are retained. Pending messages remain until delivered, with a 2,000-message queue cap. Monitor an extended delivery failure before the queue fills.
 
 Tokens are in process memory. Root or a compromised service context can access its own secrets. `protect_content` is a Telegram convenience, not a confidentiality guarantee. Telegram receives the selected operational summaries sent to the owner's chat.
 

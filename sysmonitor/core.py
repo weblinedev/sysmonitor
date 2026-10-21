@@ -49,12 +49,24 @@ def parse_metrics(text):
 
 def validate_telemetry(payload):
     allowed = {"cpu_percent", "memory_percent", "disk_percent", "swap_percent",
-               "uptime_seconds", "load1", "cores", "services"}
+               "uptime_seconds", "load1", "cores", "services", "contributors"}
     if not isinstance(payload, dict) or set(payload) - allowed:
         raise ValueError("Unexpected telemetry fields")
     out = {}
     for key, value in payload.items():
-        if key == "services":
+        if key == "contributors":
+            if not isinstance(value, list) or len(value) > 6:
+                raise ValueError("Invalid contributors")
+            for row in value:
+                if (not isinstance(row, dict) or set(row) != {"group", "cpu_percent", "memory_percent"}
+                        or row["group"] not in PROCESS_GROUPS):
+                    raise ValueError("Invalid contributor group")
+                for field in ("cpu_percent", "memory_percent"):
+                    n = row[field]
+                    if isinstance(n, bool) or not isinstance(n, (int, float)) or not math.isfinite(n) or not 0 <= n <= 100:
+                        raise ValueError("Invalid contributor metric")
+            out[key] = value
+        elif key == "services":
             if not isinstance(value, dict) or len(value) > 20:
                 raise ValueError("Invalid services")
             if any(not re.fullmatch(r"[a-zA-Z0-9_.@-]{1,80}", k)
@@ -86,6 +98,10 @@ class Store:
               CREATE TABLE IF NOT EXISTS outbox (
                 id INTEGER PRIMARY KEY, text TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
                 next_try REAL NOT NULL DEFAULT 0, created REAL NOT NULL);
+              CREATE TABLE IF NOT EXISTS resource_daily (
+                day TEXT PRIMARY KEY, samples INTEGER NOT NULL,
+                cpu_sum REAL NOT NULL, cpu_max REAL NOT NULL,
+                ram_sum REAL NOT NULL, ram_max REAL NOT NULL, disk_max REAL NOT NULL);
             ''')
 
     @contextlib.contextmanager
@@ -166,11 +182,11 @@ def status_text(snapshot, max_age=120):
     for row in list(rows.values())[:30]:
         icon, label = STATUS.get(row.get("status"), ("⚪", "نامشخص"))
         ms = row.get("response_time")
-        suffix = f" · {ms:.0f} ms" if ms is not None and row.get("status") == 1 else ""
-        lines.append(f"{icon} {clean(row['name'], 70)}: {label}{suffix}")
+        suffix = f" · زمان پاسخ: <code>{ms:.0f} ms</code>" if ms is not None and row.get("status") == 1 else ""
+        lines.append(f"{icon} <b>{clean(row['name'], 70)}</b>\n{label}{suffix}\n")
     if not rows:
         lines.append("هنوز مانیتوری با داده قابل‌خواندن ثبت نشده است.")
-    lines += ["", "آخرین دریافت: " + utcstamp(snapshot["time"])]
+    lines += ["", "آخرین دریافت: <code>" + utcstamp(snapshot["time"]) + "</code>"]
     return "\n".join(lines)
 
 
@@ -191,5 +207,21 @@ def resources_text(snapshot, max_age=180):
     lines.append(f"Uptime: {data['uptime_seconds']/86400:.1f} days")
     for unit, value in data.get("services", {}).items():
         lines.append(f"{'🟢' if value == 'active' else '🟠'} {clean(unit)}: {clean(value)}")
-    lines += ["", "آخرین دریافت: " + utcstamp(snapshot["time"])]
+    if data.get("contributors"):
+        lines += ["", contributors_text(data)]
+    lines += ["", "آخرین دریافت: <code>" + utcstamp(snapshot["time"]) + "</code>"]
+    return "\n".join(lines)
+
+
+PROCESS_GROUPS = frozenset(("PHP", "Apache", "Database", "Security", "cPanel", "SSH", "Backup", "Other"))
+
+
+def contributors_text(data):
+    rows = sorted(data.get("contributors", []), key=lambda r: r["cpu_percent"] + r["memory_percent"], reverse=True)[:4]
+    if not rows:
+        return "سهم سرویس‌ها در این نمونه در دسترس نیست."
+    lines = ["بیشترین سهم مشاهده‌شده در همین نمونه:"]
+    for row in rows:
+        lines.append(f"• <b>{row['group']}</b> · CPU <code>{row['cpu_percent']:.1f}%</code> · RAM <code>{row['memory_percent']:.1f}%</code>")
+    lines.append("این سهم مصرف است، نه اثبات علت؛ حافظه اشتراکی ممکن است چندبار شمرده شود.")
     return "\n".join(lines)

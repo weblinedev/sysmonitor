@@ -2,6 +2,24 @@
 
 All notable project changes are documented here. Versions use semantic versioning. Dates are ISO 8601.
 
+## [0.2.0] - 2026-10-22
+
+### Added
+
+- Three disk alert levels at 80%, 90% and 95%, with two-point recovery hysteresis and no repeated unchanged-level alerts.
+- CPU/RAM alerts above 90% for at least five elapsed minutes and five reports, resetting confirmation after a stale gap; recovery below 85%.
+- Bounded unprivileged process-group sampling: only numeric CPU/RSS totals for fixed categories, never arguments, environment, usernames or customer paths.
+- Core systemd service alerts after three failed/inactive reports over two minutes; recovery notifications, no automatic restart.
+- Persistent daily reports at 23:00 Asia/Tehran by default, with owner-only on/off/time controls independent of incident alerts.
+- Thirty-five-day daily numeric sample aggregates, explicit sampling limits and stale-data reporting.
+- Isolated pinned Caddy 2.11.7 TLS ingress staging, source-IP/path restrictions, independent bearer authentication and credential refresh timer.
+- Time-controlled tests for real elapsed alert confirmation, stale gaps, escalation/recovery and durable daily scheduling.
+
+### Changed
+
+- Improved Persian status layout with separate service names and response-time fields.
+- Resource alert policy supersedes the initial 0.1.0 three-sample policy.
+
 ## [0.1.0] - 2026-10-21
 
 ### Added

@@ -1,0 +1,17 @@
+[Unit]
+Description=Validate and refresh changed SysMonitor TLS credentials
+After=sysmonitor-ingress.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/sysmonitor/deploy/refresh-ingress.py
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/sysmonitor-ingress-refresh
+StateDirectory=sysmonitor-ingress-refresh
+TimeoutStartSec=30
+MemoryMax=128M
+CPUQuota=20%
