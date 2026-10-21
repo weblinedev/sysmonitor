@@ -82,7 +82,7 @@ Initial provisioning can use the exact upstream version's Socket.IO operations o
 
 ## 5. Optional resource telemetry
 
-Do this only after the uptime path works. Keep the collector non-root. It reads `/proc`, root filesystem usage and a fixed list of systemd service states. It does not access customer files, passwords, database contents, logs or process command lines.
+Do this only after the uptime path works. Keep the collector non-root. It requires the existing `/usr/bin/curl` and uses HTTP/1.1 with HTTPS-only protocols, normal certificate validation, no redirects and no environment proxy routing. The token and payload are passed through a private stdin pipe, not command arguments or temporary files. It reads `/proc`, root filesystem usage and a fixed list of systemd service states. It does not access customer files, passwords, database contents, logs or process command lines.
 
 Provide a **direct HTTPS** endpoint terminating at a separately reviewed reverse proxy on the monitoring host. Use a spare port such as 18443 only after verifying it is free and allowed. Keep the existing VPN listeners in place. Configure the proxy to:
 

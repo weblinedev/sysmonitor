@@ -17,6 +17,8 @@ All notable project changes are documented here. Versions use semantic versionin
 
 ### Changed
 
+- Collector uses the host curl with HTTP/1.1 after route-specific urllib body timeouts and HTTP/2 stream failures were reproduced; credentials/config are supplied over stdin, certificate validation stays enabled, and redirects/proxies are disabled.
+- Added daily preview without consuming the scheduled evening report.
 - Improved Persian status layout with separate service names and response-time fields.
 - Resource alert policy supersedes the initial 0.1.0 three-sample policy.
 

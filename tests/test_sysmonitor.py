@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from sysmonitor.app import Application, Config
 from sysmonitor.core import Store, parse_metrics, resources_text, status_text, validate_telemetry
+from sysmonitor.collector import send_sample
 
 EVENT = {"monitor": {"id": 1, "name": "HTTPS <prod>"},
          "heartbeat": {"status": 0, "time": "2026-10-21 09:30:00", "msg": "secret URL ignored"}}
@@ -203,6 +204,22 @@ class TestSysMonitor(unittest.TestCase):
                       [{**valid[0], "cmdline": "secret"}], [{**valid[0], "cpu_percent": float("inf")}], valid*7):
             with self.assertRaises(ValueError):
                 validate_telemetry({**METRIC, "contributors": value})
+
+    def test_collector_transport_keeps_secret_off_argv_and_rejects_redirect(self):
+        token = "t"*48
+        with patch("sysmonitor.collector.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout="202")) as run:
+            send_sample("https://monitor.example/telemetry/iran", token, b'{"a":1}')
+            args, kwargs = run.call_args
+            self.assertNotIn(token, " ".join(args[0]))
+            self.assertIn(token, kwargs["input"])
+            self.assertIn("--http1.1", args[0])
+            self.assertIn("--disable", args[0])
+            self.assertNotIn("--location", args[0])
+            self.assertNotIn("--insecure", args[0])
+        for status in ("301", "401", "500"):
+            with patch("sysmonitor.collector.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=status)):
+                with self.assertRaises(RuntimeError):
+                    send_sample("https://monitor.example/telemetry/iran", token, b'{}')
 
     def test_config_rejects_public_receiver_and_remote_kuma(self):
         env = {"TELEGRAM_BOT_TOKEN": "fake", "TELEGRAM_OWNER_ID": "12345",

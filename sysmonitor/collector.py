@@ -7,8 +7,7 @@ import shutil
 import subprocess
 import time
 import urllib.parse
-import urllib.request
-import urllib.error
+import re
 
 UNITS = ("httpd.service", "mariadb.service", "sshd.service", "lfd.service", "imunify360.service")
 
@@ -87,9 +86,26 @@ def collect():
         "contributors": contributors(processes_first, processes_second, elapsed, mem["MemTotal"])}
 
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None  # A redirect must never forward a telemetry bearer credential.
+def send_sample(url, token, payload):
+    """Use the host's curl HTTP/1.1 transport; secret config travels only over stdin.
+
+    Deployment probes found urllib body timeouts and HTTP/2 stream failures on
+    the production-to-monitor route, while curl HTTP/1.1 completed reliably.
+    Certificate validation remains on; no redirects or environment proxy routing.
+    """
+    config = "\n".join((
+        "url = " + json.dumps(url), "request = \"POST\"",
+        "header = " + json.dumps("Authorization: Bearer " + token),
+        'header = "Content-Type: application/json"',
+        "data-binary = " + json.dumps(payload.decode("ascii")), ""))
+    result = subprocess.run(["/usr/bin/curl", "--disable", "--http1.1", "--noproxy", "*",
+        "--proto", "=https", "--max-redirs", "0", "--connect-timeout", "5",
+        "--max-time", "20", "--silent", "--output", "/dev/null", "--write-out", "%{http_code}",
+        "--config", "-"], input=config, text=True, capture_output=True, timeout=25, check=False)
+    if result.returncode or result.stdout != "202":
+        # Never print stderr or config; malformed config errors may quote credentials.
+        status = result.stdout if re.fullmatch(r"[0-9]{3}", result.stdout) else "unknown"
+        raise RuntimeError(f"Transport exit {result.returncode}, HTTP {status}")
 
 
 def main():
@@ -97,21 +113,14 @@ def main():
     url = os.environ.get("TELEMETRY_URL", "")
     token = os.environ.get("TELEMETRY_TOKEN", "")
     parsed = urllib.parse.urlsplit(url)
-    if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.query
-            or parsed.fragment or parsed.path != "/telemetry/iran" or len(token) < 32):
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None or parsed.query
+            or parsed.fragment or parsed.path != "/telemetry/iran" or not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", token)):
         raise SystemExit("A direct HTTPS /telemetry/iran URL and 32+ character token are required")
     payload = json.dumps(collect()).encode()
-    request = urllib.request.Request(url, data=payload,
-        headers={"Content-Type": "application/json", "Authorization": "Bearer " + token}, method="POST")
     try:
-        with urllib.request.build_opener(NoRedirect).open(request, timeout=20) as response:
-            if response.status != 202:
-                raise RuntimeError("Unexpected status")
-    except urllib.error.HTTPError as error:
-        logging.error("Telemetry delivery failed (HTTP %s); next timer run will retry", error.code)
-        raise SystemExit(1)
-    except urllib.error.URLError as error:
-        logging.error("Telemetry connection failed (%s); next timer run will retry", type(error.reason).__name__)
+        send_sample(url, token, payload)
+    except RuntimeError as error:
+        logging.error("Telemetry delivery failed (%s); next timer run will retry", error)
         raise SystemExit(1)
     except Exception:
         # HTTP errors include URL; URL could contain private infrastructure details.

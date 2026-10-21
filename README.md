@@ -82,3 +82,5 @@ SysMonitor: MIT, copyright Amir Hossein Khateri. [Uptime Kuma](https://github.co
 Disk alerts escalate at 80/90/95%; CPU and RAM require five elapsed minutes at 90% or above, with stale-gap resets and recovery hysteresis. Fixed process-group summaries help identify the largest observed consumers without customer paths or process arguments. Core service failures have their own sustained-state alerts.
 
 Daily reports default to 23:00 Asia/Tehran. The owner can use `/daily on`, `/daily off` and `/daily time 23:30`; disabling reports never mutes alerts. See the [Persian operations guide](docs/OPERATIONS.fa.md) for measurement limits and controls.
+
+The collector requires the operating system curl executable. The Python package has no third-party Python runtime dependencies. Network transport is fixed to verified HTTPS over HTTP/1.1; bearer credentials are passed to curl on stdin.
