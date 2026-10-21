@@ -75,3 +75,10 @@ docs/                research, deployment, operations and verification
 ## Attribution and license
 
 SysMonitor: MIT, copyright Amir Hossein Khateri. [Uptime Kuma](https://github.com/louislam/uptime-kuma) and [SysReport](https://github.com/amirkhateri/sysreport) are separate projects. No upstream product is relabeled as SysMonitor. See [LICENSE](LICENSE), [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md).
+
+
+### Resource policy and daily reports (0.2)
+
+Disk alerts escalate at 80/90/95%; CPU and RAM require five elapsed minutes at 90% or above, with stale-gap resets and recovery hysteresis. Fixed process-group summaries help identify the largest observed consumers without customer paths or process arguments. Core service failures have their own sustained-state alerts.
+
+Daily reports default to 23:00 Asia/Tehran. The owner can use `/daily on`, `/daily off` and `/daily time 23:30`; disabling reports never mutes alerts. See the [Persian operations guide](docs/OPERATIONS.fa.md) for measurement limits and controls.

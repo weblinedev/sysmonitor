@@ -8,6 +8,7 @@ import subprocess
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 
 UNITS = ("httpd.service", "mariadb.service", "sshd.service", "lfd.service", "imunify360.service")
 
@@ -103,9 +104,15 @@ def main():
     request = urllib.request.Request(url, data=payload,
         headers={"Content-Type": "application/json", "Authorization": "Bearer " + token}, method="POST")
     try:
-        with urllib.request.build_opener(NoRedirect).open(request, timeout=10) as response:
+        with urllib.request.build_opener(NoRedirect).open(request, timeout=20) as response:
             if response.status != 202:
                 raise RuntimeError("Unexpected status")
+    except urllib.error.HTTPError as error:
+        logging.error("Telemetry delivery failed (HTTP %s); next timer run will retry", error.code)
+        raise SystemExit(1)
+    except urllib.error.URLError as error:
+        logging.error("Telemetry connection failed (%s); next timer run will retry", type(error.reason).__name__)
+        raise SystemExit(1)
     except Exception:
         # HTTP errors include URL; URL could contain private infrastructure details.
         logging.error("Telemetry delivery failed; next timer run will retry with a fresh sample")

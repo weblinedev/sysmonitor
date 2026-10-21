@@ -88,7 +88,7 @@ Provide a **direct HTTPS** endpoint terminating at a separately reviewed reverse
 
 1. Expose only `POST /telemetry/iran`, proxying to `127.0.0.1:9081`.
 2. Use a valid certificate and TLS 1.2+; never disable certificate verification.
-3. Limit request bodies to 16 KiB, add request timeouts and a small rate limit.
+3. Limit request bodies to 16 KiB and add request timeouts. This Caddy build has no additional rate-limit plugin; source filtering and bounded receiver resources are the controls here.
 4. Restrict source IP to the production host where possible, preserving the independent bearer check.
 5. Avoid logging authorization headers or request bodies.
 6. Return 404 for `/kuma`, `/healthz` and unrelated paths on that public listener.
@@ -127,3 +127,12 @@ sudo systemctl disable --now sysmonitor sysmonitor-kuma
 ```
 
 Remove any newly added proxy/firewall configuration by restoring its explicit checkpoint, test its configuration, and reload only that proxy if one was added. Archive source/state before deleting anything. Do not delete the pre-existing runtime or shared service files.
+
+
+## Dedicated TLS ingress recipe
+
+`deploy/prepare-ingress.py` stages Caddy 2.11.7 after verifying the official Linux amd64 archive against its pinned release SHA-256. Pass `--hostname`, `--source-ip`, `--certificate`, `--private-key` and optionally `--port` (default 18443). First inspect both the receiver's existing listeners and the production host's outbound policy. Prefer a free port already permitted by that policy instead of modifying the production firewall.
+
+The helper validates its configuration but does not activate it. After review, enable `sysmonitor-ingress.service`. Only the telemetry POST route from the selected source and loopback is proxied; the bridge still authenticates its separate bearer token. Caddy admin and automatic HTTPS are disabled, the existing certificate is supplied through systemd `LoadCredential`, and no 80/443 listener is claimed. Only HTTP/1.1 and HTTP/2 are enabled; no QUIC UDP listener is added. All other routes return 404.
+
+Install `sysmonitor-ingress-refresh.service` and its timer after activation. It checks every twelve hours, validates changed credentials and restarts only this ingress. It does not renew certificates or restart the existing VPN; keep the external renewal mechanism working and monitor certificate expiry independently. Stop both the ingress and its refresh timer for rollback. Never restore the old test port accidentally from a retained preparation config.

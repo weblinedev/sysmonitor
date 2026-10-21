@@ -170,6 +170,8 @@ class TestSysMonitor(unittest.TestCase):
         from sysmonitor.app import TEHRAN
         stamp = datetime(2026, 10, 22, 23, 1, tzinfo=TEHRAN).timestamp()
         self.app.reply("daily off")
+        self.assertIn("پیش‌نمایش", self.app.reply("daily preview"))
+        self.assertIsNone(self.app.store.get("daily_sent"))
         with patch("time.time", return_value=stamp):
             self.app.daily_once()
             self.app.accept_telemetry({**METRIC, "disk_percent": 96})

@@ -100,6 +100,8 @@ class Application:
             command = "daily " + command.rsplit("_", 1)[1]
         if command.split(" ")[0] == "daily":
             parts = command.split()
+            if parts[1:] == ["preview"]:
+                return self.daily_once(preview=True)
             if parts[1:] in (["on"], ["off"]):
                 self.store.set("daily_enabled", parts[1] == "on")
             elif len(parts) == 3 and parts[1] == "time" and re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", parts[2]):
@@ -290,12 +292,12 @@ class Application:
                 state["active"] = False
             self.store.set("service:" + unit, state)
 
-    def daily_once(self):
-        if not self.store.get("daily_enabled", True):
+    def daily_once(self, preview=False):
+        if not preview and not self.store.get("daily_enabled", True):
             return
         now = datetime.fromtimestamp(time.time(), TEHRAN)
         day = now.date().isoformat()
-        if now.strftime("%H:%M") < self.store.get("daily_time", "23:00"):
+        if not preview and now.strftime("%H:%M") < self.store.get("daily_time", "23:00"):
             return
         snapshot = self.store.get("snapshot")
         if snapshot:
@@ -311,12 +313,14 @@ class Application:
                 lines.append("آپتایم ثبت‌شده در بازه ۲۴ ساعت:\n"+"\n".join(ratios))
         with self.store.db() as db:
             row = db.execute("SELECT value FROM state WHERE key='daily_sent'").fetchone()
-            if row and json.loads(row[0]) == day:
+            if not preview and row and json.loads(row[0]) == day:
                 return
             stats = db.execute("SELECT * FROM resource_daily WHERE day=?", (day,)).fetchone()
             if stats:
                 lines.append(f"📈 نمونه‌های امروز: {stats['samples']}\nCPU میانگین/اوج: {stats['cpu_sum']/stats['samples']:.1f}% / {stats['cpu_max']:.1f}%\nRAM میانگین/اوج: {stats['ram_sum']/stats['samples']:.1f}% / {stats['ram_max']:.1f}%\nاوج دیسک: {stats['disk_max']:.1f}%")
             lines.append("این گزارش جمع‌بندی پایش است؛ سالم بودن همه وب‌سایت‌ها و تراکنش‌ها را تضمین نمی‌کند.\nتنظیم گزارش: /daily")
+            if preview:
+                return "🧪 پیش‌نمایش؛ زمان‌بندی گزارش تغییر نکرد.\n\n" + "\n\n".join(lines)
             self.store._enqueue(db, "\n\n".join(lines))
             db.execute("INSERT OR REPLACE INTO state VALUES ('daily_sent',?)", (json.dumps(day),))
 

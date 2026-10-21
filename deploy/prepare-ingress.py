@@ -21,9 +21,12 @@ def main():
     p.add_argument("--source-ip", required=True)
     p.add_argument("--certificate", required=True)
     p.add_argument("--private-key", required=True)
+    p.add_argument("--port", type=int, default=18443)
     args = p.parse_args()
     if os.geteuid() != 0:
         p.error("root required")
+    if not 1024 <= args.port <= 65535:
+        p.error("an unprivileged TCP port is required")
     if not re.fullmatch(r"[a-zA-Z0-9.-]+", args.hostname):
         p.error("invalid hostname")
     source = str(ipaddress.ip_address(args.source_ip))
@@ -62,14 +65,14 @@ def main():
         protocols h1 h2
         timeouts {
             read_header 5s
-            read_body 5s
-            write 10s
+            read_body 15s
+            write 20s
             idle 30s
         }
         max_header_size 16KB
     }
 }
-https://HOSTNAME:18443 {
+https://HOSTNAME:PORT {
     tls {$CREDENTIALS_DIRECTORY}/tls.crt {$CREDENTIALS_DIRECTORY}/tls.key
     @sample {
         remote_ip SOURCEIP 127.0.0.1 ::1
@@ -81,6 +84,7 @@ https://HOSTNAME:18443 {
             max_size 16KB
         }
         reverse_proxy 127.0.0.1:9081 {
+            request_buffers 16KB
             transport http {
                 dial_timeout 2s
                 response_header_timeout 5s
@@ -91,7 +95,7 @@ https://HOSTNAME:18443 {
         respond 404
     }
 }
-""".replace("HOSTNAME", args.hostname).replace("SOURCEIP", source)
+""".replace("HOSTNAME", args.hostname).replace("SOURCEIP", source).replace(":PORT", ":"+str(args.port))
         staged = scratch / "Caddyfile"
         staged.write_text(content)
         subprocess.run([str(binary), "validate", "--config", str(staged), "--adapter", "caddyfile"],
