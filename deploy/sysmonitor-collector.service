@@ -1,0 +1,28 @@
+[Unit]
+Description=SysMonitor minimal read-only telemetry sample
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=true
+WorkingDirectory=/opt/sysmonitor
+EnvironmentFile=/etc/sysmonitor/collector.env
+ExecStart=/usr/bin/python3 -m sysmonitor.collector
+TimeoutStartSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryMax=64M
+CPUQuota=10%
+TasksMax=8
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

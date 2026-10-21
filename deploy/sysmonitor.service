@@ -1,0 +1,33 @@
+[Unit]
+Description=SysMonitor private Telegram companion
+Wants=network-online.target
+After=network-online.target sysmonitor-kuma.service
+
+[Service]
+Type=simple
+DynamicUser=true
+StateDirectory=sysmonitor
+WorkingDirectory=/opt/sysmonitor
+EnvironmentFile=/etc/sysmonitor/bridge.env
+ExecStart=/usr/bin/python3 -m sysmonitor.app
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=128M
+CPUQuota=20%
+TasksMax=16
+
+[Install]
+WantedBy=multi-user.target
