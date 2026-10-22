@@ -74,3 +74,13 @@ A local online backup of both SQLite databases passed checksum verification and 
 The scoped Caddy receiver passed configuration/certificate validation. A port already permitted by the production outbound policy was selected after the initial port was refused; neither production firewall rules nor existing VPN listeners were changed. The collector ran successfully with `DynamicUser=yes` and a root-owned 0600 environment file inside a 0700 directory. A timer was activated. Subsequent request-body timeouts were detected by the real stale-data warning and were being corrected with a bounded body buffer and longer finite network deadline. Require successful consecutive fresh samples before recording sustained telemetry acceptance.
 
 Still track live acceptance separately for daily on/off/preview, stable telemetry after timeout repair, final permissions/listener comparison and offsite backup. Independent detection of the monitoring host's own outage remains outside this two-host installation.
+
+## Transport repair and recovery copy — 2026-10-22
+
+The final bounded collector transport uses the existing system curl with HTTP/1.1, verified HTTPS, no proxy, no redirects and credentials supplied on stdin. One actual non-root production collection completed successfully after this repair. Consecutive scheduled runs and the corresponding stale-recovery message still require live confirmation; a single successful request is not sustained acceptance. All 17 local tests passed again, including rejection of non-202 transport responses and keeping the token off argv.
+
+The owner switched daily reports off and back on and both acknowledgments were observed; the final observed setting was enabled at 23:00 Asia/Tehran. A preview command was sent, but its reply has not yet been verified.
+
+A newer online recovery archive was copied to the owner's Mac. Its SHA-256 matched the source, authenticated AES-256-GCM encryption and decrypt/readback succeeded, and both restored SQLite databases returned integrity_check=ok. The key is stored separately from the encrypted artifact in a private local directory. This is a verified manual offsite copy, not automatic offsite backup or protection from compromise of that Mac. VPN certificate private keys are not included.
+
+The proposed agent/witness architecture, bounded evidence retention, per-server ownership, observers and Bale adapter are documented in [RFC-001](architecture/RFC-001-agent-witness.fa.md). They are not implemented by the current release. Before a WAL-based expansion, verify the actual SQLite version/vendor backport against the upstream WAL-reset fix; do not upgrade WHM system libraries implicitly.

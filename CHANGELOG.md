@@ -45,3 +45,8 @@ All notable project changes are documented here. Versions use semantic versionin
 - At-least-once Telegram delivery can duplicate a message after a crash between send and acknowledgement.
 - Resource service states are reported on request; separate service-state alerts are not implemented.
 - A public telemetry TLS endpoint must be configured and verified separately before enabling the collector.
+
+### Design and verification notes — 2026-10-22
+
+- Documented the proposed agent/witness architecture, per-server ownership and viewer scopes, bounded incident evidence preservation, installer/uninstaller contract and phased migration. These capabilities are not shipped.
+- Recorded the verified manual encrypted offsite recovery copy and the remaining sustained-telemetry acceptance boundary.

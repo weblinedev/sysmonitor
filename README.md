@@ -84,3 +84,7 @@ Disk alerts escalate at 80/90/95%; CPU and RAM require five elapsed minutes at 9
 Daily reports default to 23:00 Asia/Tehran. The owner can use `/daily on`, `/daily off` and `/daily time 23:30`; disabling reports never mutes alerts. See the [Persian operations guide](docs/OPERATIONS.fa.md) for measurement limits and controls.
 
 The collector requires the operating system curl executable. The Python package has no third-party Python runtime dependencies. Network transport is fixed to verified HTTPS over HTTP/1.1; bearer credentials are passed to curl on stdin.
+
+## Next architecture (proposal)
+
+[Agent/witness, per-server ownership, bounded retention and messenger-first management — Persian RFC](docs/architecture/RFC-001-agent-witness.fa.md). This design is not the current release feature set.
